@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Geräteausleihe</title>
+<style>
+  :root {
+    --bg: #0f1720;
+    --panel: #18232f;
+    --panel-2: #1f2d3b;
+    --text: #eef3f8;
+    --muted: #9fb0c0;
+    --ok: #2fbf71;
+    --warn: #f0b429;
+    --err: #ef5350;
+    --accent: #4aa3ff;
+    --radius: 16px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 18px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .wrap {
+    max-width: 760px;
+    min-height: 100%;
+    margin: 0 auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  header { display: flex; align-items: center; justify-content: space-between; }
+  header h1 { margin: 0; font-size: 1.1rem; color: var(--muted); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+  #clock { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .card {
+    background: var(--panel);
+    border-radius: var(--radius);
+    padding: 24px;
+  }
+  #idle { text-align: center; padding: 48px 24px; }
+  #idle .icon { font-size: 4rem; line-height: 1; margin-bottom: 12px; }
+  #idle h2 { margin: 0 0 8px; font-size: 1.8rem; }
+  #idle p { margin: 0; color: var(--muted); }
+
+  #session .hello { font-size: 1.9rem; font-weight: 700; margin: 0; }
+  #session .number { color: var(--muted); margin: 2px 0 20px; }
+  #session h3 { margin: 0 0 8px; font-size: .95rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  ul#assets { list-style: none; margin: 0 0 20px; padding: 0; display: grid; gap: 8px; }
+  ul#assets li {
+    background: var(--panel-2);
+    border-radius: 12px;
+    padding: 12px 16px;
+    display: flex; justify-content: space-between; gap: 12px;
+  }
+  ul#assets li .tag { color: var(--muted); font-variant-numeric: tabular-nums; }
+  ul#assets li.empty { color: var(--muted); justify-content: center; }
+  .hint { color: var(--muted); font-size: .95rem; margin: 0 0 16px; }
+
+  button {
+    font: inherit; font-weight: 600;
+    background: var(--accent); color: #04121f;
+    border: 0; border-radius: 12px;
+    padding: 14px 22px; min-height: 52px;
+    cursor: pointer;
+  }
+  button.secondary { background: var(--panel-2); color: var(--text); }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  .bar { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; margin-top: 20px; }
+  .bar > div { height: 100%; width: 100%; background: var(--accent); transform-origin: left; }
+
+  #feedback {
+    border-radius: var(--radius);
+    padding: 18px 22px;
+    font-size: 1.25rem; font-weight: 600;
+    display: none;
+  }
+  #feedback.show { display: block; }
+  #feedback.ok   { background: rgba(47,191,113,.16); color: #7be6a8; border: 2px solid var(--ok); }
+  #feedback.warn { background: rgba(240,180,41,.14); color: #ffd980; border: 2px solid var(--warn); }
+  #feedback.err  { background: rgba(239,83,80,.14);  color: #ff9a97; border: 2px solid var(--err); }
+
+  form.scan { margin-top: auto; display: flex; gap: 12px; }
+  form.scan input {
+    flex: 1; min-width: 0;
+    font: inherit; color: var(--text);
+    background: var(--panel); border: 2px solid var(--panel-2);
+    border-radius: 12px; padding: 14px 16px; min-height: 52px;
+  }
+  form.scan input:focus { outline: none; border-color: var(--accent); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Geräteausleihe</h1>
+    <span id="clock"></span>
+  </header>
+
+  <div id="feedback" role="status" aria-live="polite"></div>
+
+  <section id="idle" class="card">
+    <div class="icon">🪪</div>
+    <h2>Bitte Karte scannen</h2>
+    <p>Danach das Gerät scannen, um es auszuleihen. Zur Rückgabe das Gerät einfach scannen.</p>
+  </section>
+
+  <section id="session" class="card" hidden>
+    <p class="hello" id="name"></p>
+    <p class="number" id="number"></p>
+    <h3>Aktuell ausgeliehen</h3>
+    <ul id="assets"></ul>
+    <p class="hint">Gerät scannen zum Ausleihen oder Zurückgeben. Zum Beenden die Karte erneut scannen.</p>
+    <div class="row">
+      <button type="button" id="done" class="secondary">Fertig / Abmelden</button>
+    </div>
+    <div class="bar"><div id="bar"></div></div>
+  </section>
+
+  <form class="scan" id="form" autocomplete="off">
+    <input id="code" name="code" type="text" placeholder="Karte oder Gerät scannen …"
+           autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go">
+    <button type="submit">OK</button>
+  </form>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const SESSION_KEY = 'ausleihe_session';
+  const el = (id) => document.getElementById(id);
+  const input = el('code');
+
+  let idleMs = 45000;
+  let user = null;           // { id, name, number }
+  let assets = [];
+  let deadline = 0;          // Zeitpunkt des automatischen Abmeldens
+  let feedbackTimer = null;
+  const queue = [];
+  let busy = false;
+
+  // ---------- Hilfen ----------
+  function saveSession() {
+    try {
+      if (user) localStorage.setItem(SESSION_KEY, JSON.stringify({ user, ts: Date.now() }));
+      else localStorage.removeItem(SESSION_KEY);
+    } catch (_) { /* Speicher nicht verfügbar */ }
+  }
+
+  function beep(kind) {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = beep.ctx || (beep.ctx = new Ctx());
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.value = kind === 'err' ? 220 : kind === 'warn' ? 330 : 880;
+      g.gain.value = 0.08;
+      o.connect(g); g.connect(ctx.destination);
+      o.start();
+      o.stop(ctx.currentTime + (kind === 'err' ? 0.35 : 0.12));
+    } catch (_) { /* Ton nicht möglich */ }
+  }
+
+  function feedback(kind, text) {
+    const box = el('feedback');
+    box.className = 'show ' + kind;
+    box.textContent = text;
+    beep(kind);
+    clearTimeout(feedbackTimer);
+    feedbackTimer = setTimeout(() => { box.className = ''; }, 8000);
+  }
+
+  function touch() {
+    deadline = Date.now() + idleMs;
+  }
+
+  // ---------- Darstellung ----------
+  function render() {
+    el('idle').hidden = !!user;
+    el('session').hidden = !user;
+    if (!user) return;
+    el('name').textContent = 'Hallo ' + user.name;
+    el('number').textContent = user.number ? 'Nr. ' + user.number : '';
+    const list = el('assets');
+    list.textContent = '';
+    if (!assets.length) {
+      const li = document.createElement('li');
+      li.className = 'empty';
+      li.textContent = 'Nichts ausgeliehen';
+      list.appendChild(li);
+    } else {
+      for (const a of assets) {
+        const li = document.createElement('li');
+        const n = document.createElement('span');
+        n.textContent = a.name;
+        const t = document.createElement('span');
+        t.className = 'tag';
+        t.textContent = a.tag;
+        li.append(n, t);
+        list.appendChild(li);
+      }
+    }
+  }
+
+  function logout(silent) {
+    user = null;
+    assets = [];
+    saveSession();
+    render();
+    if (!silent) feedback('ok', 'Abgemeldet.');
+    focusInput();
+  }
+
+  function focusInput() {
+    if (matchMedia('(pointer: fine)').matches) input.focus();
+  }
+
+  // ---------- Kommunikation ----------
+  async function api(path, body) {
+    const res = await fetch(path, body ? {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    } : undefined);
+    return res.json();
+  }
+
+  async function processScan(code) {
+    let r;
+    try {
+      r = await api('/api/scan', { code, userId: user ? user.id : null });
+    } catch (_) {
+      feedback('err', 'Keine Verbindung zum Kiosk-Server.');
+      return;
+    }
+    switch (r.result) {
+      case 'login':
+        user = r.user; assets = r.assets || [];
+        saveSession(); touch(); render();
+        feedback('ok', 'Hallo ' + user.name + '!');
+        break;
+      case 'logout':
+        logout(false);
+        break;
+      case 'checkout':
+        assets = r.assets || assets;
+        touch(); render();
+        feedback('ok', r.message);
+        break;
+      case 'checkin':
+        if (r.assets) assets = r.assets;
+        if (user) touch();
+        render();
+        feedback('ok', r.message);
+        break;
+      case 'need_login':
+        feedback('warn', r.message);
+        break;
+      default:
+        feedback('err', r.message || 'Unbekannter Fehler.');
+    }
+  }
+
+  async function drain() {
+    if (busy) return;
+    busy = true;
+    while (queue.length) await processScan(queue.shift());
+    busy = false;
+  }
+
+  function submitCode(code) {
+    code = String(code || '').trim();
+    if (!code) return;
+    queue.push(code);
+    drain();
+  }
+
+  // ---------- Ereignisse ----------
+  el('form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const v = input.value;
+    input.value = '';
+    submitCode(v);
+    focusInput();
+  });
+  el('done').addEventListener('click', () => logout(false));
+  document.addEventListener('click', (e) => {
+    if (user) touch();
+    if (!e.target.closest('button')) focusInput();
+  });
+  input.addEventListener('blur', () => setTimeout(focusInput, 200));
+
+  setInterval(() => {
+    el('clock').textContent = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    if (!user) return;
+    const left = deadline - Date.now();
+    el('bar').style.transform = 'scaleX(' + Math.max(0, Math.min(1, left / idleMs)) + ')';
+    if (left <= 0) {
+      logout(true);
+      feedback('warn', 'Automatisch abgemeldet.');
+    }
+  }, 250);
+
+  // ---------- Start ----------
+  (async function init() {
+    try {
+      const cfg = await api('/api/config');
+      if (cfg.idleSeconds > 0) idleMs = cfg.idleSeconds * 1000;
+    } catch (_) { /* Standardwert */ }
+
+    // Angemeldeten Benutzer nach einem Neuladen wiederherstellen
+    try {
+      const saved = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+      if (saved && saved.user && Date.now() - saved.ts < idleMs) {
+        const r = await api('/api/user/' + saved.user.id);
+        if (r.user) { user = r.user; assets = r.assets || []; touch(); }
+      } else {
+        localStorage.removeItem(SESSION_KEY);
+      }
+    } catch (_) { /* nicht eingeloggt starten */ }
+    render();
+
+    // Aufruf per NFC-Link: ?scan=GER-001
+    const params = new URLSearchParams(location.search);
+    const fromUrl = params.get('scan');
+    if (fromUrl) {
+      history.replaceState(null, '', location.pathname);
+      submitCode(fromUrl);
+    }
+    focusInput();
+  })();
+})();
+</script>
+</body>
+</html>

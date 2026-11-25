@@ -1,0 +1,13 @@
+services:
+  ausleihe-kiosk:
+    build: .
+    image: ausleihe-kiosk:latest
+    container_name: ausleihe-kiosk
+    ports:
+      - "3040:3040"
+    environment:
+      - SNIPEIT_URL=http://192.168.2.40:8095
+      - SNIPEIT_TOKEN=${SNIPEIT_TOKEN}
+      - IDLE_SECONDS=45
+      - TZ=Europe/Berlin
+    restart: unless-stopped
